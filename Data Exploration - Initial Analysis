@@ -1,0 +1,887 @@
+*********** IMPORT******************
+
+*** IMPORT ORIGINAL DATA ***;
+
+proc import datafile="\\*******\MISO_load_weather.csv" 
+	 out=miso
+     dbms=csv replace;
+run;
+
+*** IMPORT HOLIDAY DATA ***;
+
+proc import datafile="\\*******\Calendar.csv" 
+	 out=calendar
+     dbms=csv replace;
+run;
+
+*** ADD WEEKDAY VARIABLE TO THE DATA ***;
+
+data weekdaydata;
+set miso;
+date=mdy(Month, Day, Year);
+WeekDay=weekday(date)-1;
+format date date9.;
+run;
+
+*** CALCULATE AND ADD RAMP AS A VARIABLE ***;
+
+data ramp;
+merge weekdaydata weekdaydata(firstobs=2 rename=(load=_load));
+delta=_load-load;
+drop _load;
+run;
+
+*** ADD HOLIDAY AS A NEW VARIABLE ***;
+
+proc sql;
+create table miso_models2 as
+select a.*,b.holiday
+from ramp a left join calendar b
+on a.day=b.day
+and a.year=b.year
+and a.month=b.month
+;
+quit;
+
+*** SORT DATA BY YEAR, MONTH, DAY, HOUR ***;
+
+proc sort data=miso_models2;
+by Year Month Day Hour;
+run;
+
+*** DELETE HOLIDAYS FROM THE DATASET ***;
+
+data miso_no_holidays;
+set miso_models2;
+if Holiday = 1 then delete;
+run;
+
+
+******************* SUMMER CORRELATIONS *********************
+
+proc corr data=miso_no_holidays;
+where Month in (6,7,8);
+var Load Temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+title 'Overall Summer Correlation';
+run;
+
+proc corr data=miso_no_holidays;
+where Month in (6,7,8);
+where also Weekday in (1,2,3,4,5);
+var Load Temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+title 'Weekday';
+run;
+
+proc corr data=miso_no_holidays;
+where Month in (6,7,8);
+where also Weekday in (0,6);
+var Load Temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+title 'Weekend';
+run;
+
+proc sgscatter data=miso_no_holidays;
+where Month in (6,7,8);
+title "Scatterplot Matrix for MISO Load [SUMMER]";
+matrix Load Temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+run;
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+by Hour;
+var Load;
+with Temperature;
+title 'Hourly Load and Temperature Correlation';
+run;
+
+proc print data=outCorr;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr2(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+by Hour;
+var Load;
+with DewPoint;
+title 'Hourly Load and Dew Point Correlation';
+run;
+
+proc print data=outCorr2;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr3(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+by Hour;
+var Load;
+with WindSpeed;
+title 'Hourly Load and Wind Speed Correlation';
+run;
+
+proc print data=outCorr3;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr4(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+by Hour;
+var Load;
+with CloudCover;
+title 'Hourly Load and Cloud Cover Correlation';
+run;
+
+proc print data=outCorr4;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr5(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+by Hour;
+var Load;
+with SolarRadiation;
+title 'Hourly Load and Sunshine Minutes Correlation';
+run;
+
+proc print data=outCorr5;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr6(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+by Hour;
+var Load;
+with RainFall;
+title 'Hourly Load and Rain Fall Correlation';
+run;
+
+proc print data=outCorr6;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr7(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+where Weekday in (1,2,3,4,5);
+by Hour;
+var Load;
+with DewPoint;
+title 'Hourly Load and Dew Point Correlation (Weekday)';
+run;
+
+proc print data=outCorr7;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr8(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+where Weekday in (0,6);
+by Hour;
+var Load;
+with DewPoint;
+title 'Hourly Load and Dew Point Correlation (Weekend)';
+run;
+
+proc print data=outCorr8;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr9(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+by Hour;
+var Temperature;
+with SolarRadiation;
+title 'Hourly Load and Dew Point Correlation (Weekday)';
+run;
+
+proc print data=outCorr9;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr10(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+by Hour;
+var WindSpeed;
+with SolarRadiation;
+title 'Hourly Load and Dew Point Correlation (Weekday)';
+run;
+
+proc print data=outCorr10;
+run;
+
+proc corr data=miso_no_holidays NOPRINT out=outCorr11(where=(_TYPE_="CORR"));
+where Month in (6,7,8);
+by Hour;
+var CloudCover;
+with SolarRadiation;
+title 'Hourly Load and Dew Point Correlation (Weekday)';
+run;
+
+proc print data=outCorr11;
+run;
+
+proc sgplot data=miso_no_holidays;
+where Month in (6,7,8);
+scatter x=DewPoint y=CloudCover / markerattrs=(symbol=plus color=cornflowerblue);
+xaxis label='Dew Point (°F)';
+yaxis label='Cloud Cover (%)';
+run;
+
+proc sgplot data=miso_no_holidays noautolegend;
+where Month in (6,7,8);
+where also Hour in (15,16,17,18);
+reg x=Temperature y=CloudCover / markerattrs=(symbol=plus color=crimson) lineattrs=(color=crimson);
+xaxis label='Temperature (°F)';
+yaxis label='Cloud Cover (%)';
+run;
+
+proc sgplot data=miso_no_holidays;
+where Month in (6,7,8);
+where also SolarRadiation > 10;
+scatter x=SolarRadiation y=CloudCover / markerattrs=(symbol=plus color=cornflowerblue);
+xaxis label='Sunshine Minutes';
+yaxis label='Cloud Cover (%)';
+run;
+
+
+****************** SEASONAL SCATTERPLOTS ************************
+
+*** SEASONAL SCATTERPLOTS ***;
+data miso2;
+   set miso_no_holidays;
+   if Weekday in (1:5) then groupvar='Weekday';
+   else groupvar='Weekend';
+run;
+
+proc sgplot data=miso2; * TEMPERATURE *;
+scatter x=Temperature y=Load / group=groupvar;
+xaxis label="Temperature (degrees F)";
+yaxis label="Load (MW)";
+title 'Load vs Temperature (overall)';
+run;
+
+proc format library=work;
+value season
+12,1,2 = 'Winter'
+3,4,5 = 'Spring'
+6,7,8 = 'Summer'
+9,10,11 = 'Fall';
+run;
+
+proc sgpanel data=miso2 ;
+   panelby month /layout=panel rows=2 columns=2 onepanel ;
+   format month season.;
+   scatter x=Temperature y=Load / group=groupvar;
+   colaxis label="Temperature (degrees F)";
+   rowaxis label="Load (MW)";
+   title 'Load vs Temperature (overall)';
+run;
+
+proc sgplot data=miso2; * DEW POINT *;
+scatter x=DewPoint y=Load / group=groupvar;
+xaxis label="Dew Point (degrees F)";
+yaxis label="Load (MW)";
+title 'Load vs Dew Point (overall)';
+run;
+
+proc format library=work;
+value season
+12,1,2 = 'Winter'
+3,4,5 = 'Spring'
+6,7,8 = 'Summer'
+9,10,11 = 'Fall';
+run;
+
+proc sgpanel data=miso2 ;
+   panelby month /layout=panel rows=2 columns=2 onepanel ;
+   format month season.;
+   scatter x=DewPoint y=Load / group=groupvar;
+   colaxis label="Dew Point (degrees F)";
+   rowaxis label="Load (MW)";
+   title 'Load vs Dew Point';
+run;
+
+proc sgplot data=miso2; * WIND SPEED *;
+scatter x=WindSpeed y=Load / group=groupvar;
+xaxis label="Wind Speed (ft/sec)";
+yaxis label="Load (MW)";
+title 'Load vs Wind Speed (overall)';
+run;
+
+proc format library=work;
+value season
+12,1,2 = 'Winter'
+3,4,5 = 'Spring'
+6,7,8 = 'Summer'
+9,10,11 = 'Fall';
+run;
+
+proc sgpanel data=miso2 ;
+   panelby month /layout=panel rows=2 columns=2 onepanel ;
+   format month season.;
+   scatter x=WindSpeed y=Load / group=groupvar;
+   colaxis label="Wind Speed (ft/sec)";
+   rowaxis label="Load (MW)";
+   title 'Load vs Wind Speed';
+run;
+
+proc sgplot data=miso2; * CLOUD COVER *;
+scatter x=CloudCover y=Load / group=groupvar;
+xaxis label="Cloud Cover (0-100%)";
+yaxis label="Load (MW)";
+title 'Load vs Cloud Cover (overall)';
+run;
+
+proc format library=work;
+value season
+12,1,2 = 'Winter'
+3,4,5 = 'Spring'
+6,7,8 = 'Summer'
+9,10,11 = 'Fall';
+run;
+
+proc sgpanel data=miso2 ;
+   panelby month /layout=panel rows=2 columns=2 onepanel ;
+   format month season.;
+   scatter x=CloudCover y=Load / group=groupvar;
+   colaxis label="Cloud Cover (0-100%)";
+   rowaxis label="Load (MW)";
+   title 'Load vs Cloud Cover';
+run;
+
+proc sgplot data=miso2; * SOLAR RADIATION *;
+scatter x=SolarRadiation y=Load / group=groupvar;
+xaxis label="Solar Radiation (0-60)";
+yaxis label="Load (MW)";
+title 'Load vs Sunshine Minutes (overall)';
+run;
+
+proc format library=work;
+value season
+12,1,2 = 'Winter'
+3,4,5 = 'Spring'
+6,7,8 = 'Summer'
+9,10,11 = 'Fall';
+run;
+
+proc sgpanel data=miso2 ;
+   panelby month /layout=panel rows=2 columns=2 onepanel ;
+   format month season.;
+   scatter x=SolarRadiation y=Load / group=groupvar;
+   colaxis label="Solar Radiation";
+   rowaxis label="Load (MW)";
+   title 'Load vs Sunshine Minutes';
+run;
+
+proc sgplot data=miso2; * RAIN FALL *;
+scatter x=RainFall y=Load / group=groupvar;
+xaxis label="RainFall";
+yaxis label="Load (MW)";
+title 'Load vs Rain Fall (overall)';
+run;
+
+proc format library=work;
+value season
+12,1,2 = 'Winter'
+3,4,5 = 'Spring'
+6,7,8 = 'Summer'
+9,10,11 = 'Fall';
+run;
+
+proc sgpanel data=miso2 ;
+   panelby month /layout=panel rows=2 columns=2 onepanel ;
+   format month season.;
+   scatter x=RainFall y=Load / group=groupvar;
+   colaxis label="Rain Fall";
+   rowaxis label="Load (MW)";
+   title 'Load vs Rain Fall';
+run;
+
+
+***************** MONTHLY LINE GRAPHS ***************************
+
+proc sort data=miso_no_holidays;
+by Month Hour;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (1);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanJan mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (2);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanFeb mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (3);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanMar mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (4);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanApr mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (5);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanMay mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (6);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanJun mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (7);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanJul mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (8);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanAug mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (9);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanSep mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (10);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanOct mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (11);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanNov mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (12);
+by Month hour;
+var Load temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanDec mean=;
+run;
+
+
+
+data avrg;
+merge 
+	MeanJan(rename=(Load=LoadJan
+					Temperature=TempJan
+					DewPoint=DewJan
+					WindSpeed=WindJan
+					CloudCover=CCJan
+					SolarRadiation=SRJan
+					RainFall=RFJan))
+	MeanFeb(rename=(Load=LoadFeb
+					Temperature=TempFeb
+					DewPoint=DewFeb
+					WindSpeed=WindFeb
+					CloudCover=CCFeb
+					SolarRadiation=SRFeb
+					RainFall=RFFeb))
+	MeanMar(rename=(Load=LoadMar
+					Temperature=TempMar
+					DewPoint=DewMar
+					WindSpeed=WindMar
+					CloudCover=CCMar
+					SolarRadiation=SRMar
+					RainFall=RFMar))
+	MeanApr(rename=(Load=LoadApr
+					Temperature=TempApr
+					DewPoint=DewApr
+					WindSpeed=WindApr
+					CloudCover=CCApr
+					SolarRadiation=SRApr
+					RainFall=RFApr))
+	MeanMay(rename=(Load=Load
+					Temperature=Temp
+					DewPoint=Dew
+					WindSpeed=Wind
+					CloudCover=CC
+					SolarRadiation=SR
+					RainFall=RF))
+	MeanApr(rename=(Load=LoadMay
+					Temperature=TempMay
+					DewPoint=DewMay
+					WindSpeed=WindMay
+					CloudCover=CCMay
+					SolarRadiation=SRMay
+					RainFall=RFMay))
+	MeanJun(rename=(Load=LoadJun
+					Temperature=TempJun
+					DewPoint=DewJun
+					WindSpeed=WindJun
+					CloudCover=CCJun
+					SolarRadiation=SRJun
+					RainFall=RFJun))
+	MeanJul(rename=(Load=LoadJul
+					Temperature=TempJul
+					DewPoint=DewJul
+					WindSpeed=WindJul
+					CloudCover=CCJul
+					SolarRadiation=SRJul
+					RainFall=RFJul))
+	MeanAug(rename=(Load=LoadAug
+					Temperature=TempAug
+					DewPoint=DewAug
+					WindSpeed=WindAug
+					CloudCover=CCAug
+					SolarRadiation=SRAug
+					RainFall=RFAug))
+	MeanSep(rename=(Load=LoadSep
+					Temperature=TempSep
+					DewPoint=DewSep
+					WindSpeed=WindSep
+					CloudCover=CCSep
+					SolarRadiation=SRSep
+					RainFall=RFSep))
+	MeanOct(rename=(Load=LoadOct
+					Temperature=TempOct
+					DewPoint=DewOct
+					WindSpeed=WindOct
+					CloudCover=CCOct
+					SolarRadiation=SROct
+					RainFall=RFOct))
+	MeanNov(rename=(Load=LoadNov
+					Temperature=TempNov
+					DewPoint=DewNov
+					WindSpeed=WindNov
+					CloudCover=CCNov
+					SolarRadiation=SRNov
+					RainFall=RFNov))
+	MeanDec(rename=(Load=LoadDec
+					Temperature=TempDec
+					DewPoint=DewDec
+					WindSpeed=WindDec
+					CloudCover=CCDec
+					SolarRadiation=SRDec
+					RainFall=RFDec))
+					;
+	by Hour;
+	keep Hour LoadJan TempJan DewJan WindJan CCJan SRJan RFJan
+		LoadFeb TempFeb DewFeb WindFeb CCFeb SRFeb RFFeb
+		LoadMar TempMar DewMar WindMar CCMar SRMar RFMar
+		LoadApr TempApr DewApr WindApr CCApr SRApr RFApr 
+		LoadMay TempMay DewMay WindMay CCMay SRMay RFMay
+		LoadJun TempJun DewJun WindJun CCJun SRJun RFJun
+		LoadJul TempJul DewJul WindJul CCJul SRJul RFJul
+		LoadAug TempAug DewAug WindAug CCAug SRAug RFAug
+		LoadSep TempSep DewSep WindSep CCSep SRSep RFSep
+		LoadOct TempOct DewOct WindOct CCOct SROct RFOct
+		LoadNov TempNov DewNov WindNov CCNov SRNov RFNov
+		LoadDec TempDec DewDec WindDec CCDec SRDec RFDec
+		;
+run;
+
+proc print data=avrg;
+run;
+
+
+proc sgplot data=avrg;
+series x=Hour y=TempJun / legendlabel = 'June' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=GOLD);
+series x=Hour y=TempJul / legendlabel = 'July' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=DARKSEAGREEN);
+series x=Hour y=TempAug / legendlabel = 'August'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = CRIMSON);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'Temperature (°F)' GRID;
+title 'Average Summer Temperature';
+run;
+
+proc sgplot data=avrg;
+series x=Hour y=DewJun / legendlabel = 'June' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=GOLD);
+series x=Hour y=DewJul / legendlabel = 'July' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=DARKSEAGREEN);
+series x=Hour y=DewAug / legendlabel = 'August'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = CRIMSON);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'Dew Point (°F)' GRID;
+title 'Average Summer Dew Point';
+run;
+
+proc sgplot data=avrg;
+series x=Hour y=WindJun / legendlabel = 'June' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=GOLD);
+series x=Hour y=WindJul / legendlabel = 'July' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=DARKSEAGREEN);
+series x=Hour y=WindAug / legendlabel = 'August'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = CRIMSON);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'Wind Speed (ft/sec)' GRID;
+title 'Average Summer Wind Speed';
+run;
+
+proc sgplot data=avrg;
+series x=Hour y=CCJun / legendlabel = 'June' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=GOLD);
+series x=Hour y=CCJul / legendlabel = 'July' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=DARKSEAGREEN);
+series x=Hour y=CCAug / legendlabel = 'August'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = CRIMSON);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'Cloud Cover (0-100%)' GRID;
+title 'Average Summer Cloud Cover';
+run;
+
+proc sgplot data=avrg;
+series x=Hour y=SRJun / legendlabel = 'June' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=GOLD);
+series x=Hour y=SRJul / legendlabel = 'July' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=DARKSEAGREEN);
+series x=Hour y=SRAug / legendlabel = 'August'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = CRIMSON);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'Sunshine Minutes' GRID;
+title 'Average Summer Sunshine Minutes';
+run;
+
+proc sgplot data=avrg;
+series x=Hour y=RFJun / legendlabel = 'June' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=GOLD);
+series x=Hour y=RFJul / legendlabel = 'July' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=DARKSEAGREEN);
+series x=Hour y=RFAug / legendlabel = 'August'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = CRIMSON);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'Load (MW)' GRID;
+title 'Average Summer Rain Fall';
+run;
+
+
+proc sgplot data=avrg;
+series x=Hour y=LoadJan / legendlabel = 'Jan' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=DARKGREY);
+series x=Hour y=LoadFeb / legendlabel = 'Feb' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=CORNFLOWERBLUE);
+series x=Hour y=LoadMar / legendlabel = 'Mar'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = CRIMSON);
+series x=Hour y=LoadApr / legendlabel = 'Apr' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=BLUEVIOLET);
+series x=Hour y=LoadMay / legendlabel = 'May' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=DARKORANGE);
+series x=Hour y=LoadJun / legendlabel = 'Jun'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = GOLD);
+series x=Hour y=LoadJul / legendlabel = 'Jul' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=CYAN);
+series x=Hour y=LoadAug / legendlabel = 'Aug' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=FUCHSIA);
+series x=Hour y=LoadSep / legendlabel = 'Sep'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = GREENYELLOW);
+series x=Hour y=LoadOct / legendlabel = 'Oct' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=SEAGREEN);
+series x=Hour y=LoadNov / legendlabel = 'Nov' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=SADDLEBROWN);
+series x=Hour y=LoadDec / legendlabel = 'Dec'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = BLACK);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'Load (MW)' GRID;
+title 'Average Monthly Load [all months]';
+run;
+
+
+proc sort data=miso_no_holidays;
+by hour;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (6,7,8);
+by hour;
+var Load Temperature DewPoint WindSpeed CloudCover SolarRadiation RainFall;
+output out=MeanSummer mean=;
+run;
+
+proc sgplot data=MeanSummer;
+series x=Hour y=Load / legendlabel = 'Load' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = LIGHTGREEN); 
+series x=Hour y=Temperature / y2axis legendlabel = 'Temperature' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = CORNFLOWERBLUE);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD (MW)';
+Y2AXIS LABEL = 'Temperature (°F)';
+title 'Hourly Load and Temperature (Summer)';
+run;
+
+
+************************ HOURLY SCATTERS *******************************
+
+*** HOURLY SCATTERPLOTS ***;
+
+proc sort data=miso_no_holidays (where=(Month in(6,7,8)));
+by Hour;
+run;
+
+
+proc format library=work;
+value hours
+0 = '12 A.M.'
+1 = '1 A.M'
+2 = '2 A.M.'
+3 = '3 A.M'
+4 = '4 A.M.'
+5 = '5 A.M'
+6 = '6 A.M.'
+7 = '7 A.M'
+8 = '8 A.M.'
+9 = '9 A.M'
+10 = '10 A.M.'
+11 = '11 A.M'
+12 = '12 P.M.'
+13 = '1 P.M'
+14 = '2 P.M.'
+15 = '3 P.M'
+16 = '4 P.M.'
+17 = '5 P.M'
+18 = '6 P.M.'
+19 = '7 P.M'
+20 = '8 P.M.'
+21 = '9 P.M'
+22 = '10 P.M.'
+23 = '11 P.M'
+;
+run;
+
+proc sgpanel data=miso_no_holidays (where=(Month in(6,7,8))); * TEMPERATURE *;
+   panelby hour /layout=panel rows=6 columns=4 onepanel ;
+   format hour hours.;
+   scatter x=Temperature y=Load / Markerattrs=(COLOR=CORNFLOWERBLUE);
+   colaxis label="Temperature (degrees F)";
+   rowaxis label="Load (MW)";
+   title 'Hourly Load vs Temperature (SUMMER)';
+run;
+
+proc sgpanel data=miso_no_holidays (where=(Month in(6,7,8))); * DEW POINT *;
+   panelby hour /layout=panel rows=6 columns=4 onepanel ;
+   format hour hours.;
+   scatter x=DewPoint y=Load / Markerattrs=(COLOR=CORNFLOWERBLUE);
+   colaxis label="Dew Point (degrees F)";
+   rowaxis label="Load (MW)";
+   title 'Hourly Load vs Dew Point (SUMMER)';
+run;
+
+proc sgpanel data=miso_no_holidays (where=(Month in(6,7,8))); * WIND SPEED *;
+   panelby hour /layout=panel rows=6 columns=4 onepanel ;
+   format hour hours.;
+   scatter x=WindSpeed y=Load / Markerattrs=(COLOR=CORNFLOWERBLUE);
+   colaxis label="Wind Speed (ft/sec)";
+   rowaxis label="Load (MW)";
+   title 'Hourly Load vs Wind Speed (SUMMER)';
+run;
+
+proc sgpanel data=miso_no_holidays (where=(Month in(6,7,8))); * CLOUD COVER *;
+   panelby hour /layout=panel rows=6 columns=4 onepanel ;
+   format hour hours.;
+   scatter x=CloudCover y=Load / Markerattrs=(COLOR=CORNFLOWERBLUE);
+   colaxis label="Cloud Cover (0-100%)";
+   rowaxis label="Load (MW)";
+   title 'Hourly Load vs Cloud Cover (SUMMER)';
+run;
+
+proc sgpanel data=miso_no_holidays (where=(Month in(6,7,8))); * SOLAR RADIATION *;
+   panelby hour /layout=panel rows=6 columns=4 onepanel ;
+   format hour hours.;
+   scatter x=SolarRadiation y=Load / Markerattrs=(COLOR=CORNFLOWERBLUE);
+   colaxis label="Solar Radiation";
+   rowaxis label="Load (MW)";
+   title 'Hourly Load vs Solar Radiation (SUMMER)';
+run;
+
+proc sgpanel data=miso_no_holidays (where=(Month in(6,7,8))); * SOLAR RADIATION *;
+   panelby hour /layout=panel rows=6 columns=4 onepanel ;
+   format hour hours.;
+   scatter x=RainFall y=Load / Markerattrs=(COLOR=CORNFLOWERBLUE);
+   colaxis label="Rain Fall";
+   rowaxis label="Load (MW)";
+   title 'Hourly Load vs Rain Fall (SUMMER)';
+run;
+
+
+********************************* MOST SENSITIVE HOURS *****************************
+
+
+proc reg data=miso_no_holidays;
+where Month in (6,7,8);
+where also Weekday in (1,2,3,4,5);
+where also Hour in (17);
+model Load = CloudCover;
+ods output ParameterEstimates=PE;
+run;
+
+data _null_;
+set PE;
+if _n_ = 1 then call symput('Int', put(estimate, BEST6.));
+				call symput('Slope', put(estimate, BEST6.));
+run;
+
+proc sgplot data=miso_no_holidays;
+where Month in (6,7,8);
+where also Weekday in (1,2,3,4,5);
+where also Hour in (17);
+reg y=Load x=CloudCover / markerattrs=(SYMBOL = PLUS COLOR = YELLOWGREEN) lineattrs=(COLOR = YELLOWGREEN);
+inset "Intercept = &Int" "Slope = &Slope" / border title="Parameter Estimates" position=topleft;
+yaxis label='Load (MW)';
+xaxis label='Temperature (°F)';
+title 'Load vs Temperature at 5 P.M. (Weekday)';
+run;
+
+proc sgplot data=miso_no_holidays noautolegend;
+where Month in (6,7,8);
+where also Weekday in (0,6);
+where also Hour=17;
+reg y=Load x=DewPoint / markerattrs=(SYMBOL = circlefilled COLOR = YELLOWGREEN) lineattrs=(COLOR = YELLOWGREEN);
+yaxis label='Load (MW)';
+xaxis label='Temperature (°F)';
+inset (''= "5 P.M. - Weekend") / position=topleft border textattrs=GraphLabelText;
+title 'Load vs Temperature at 5 P.M. (Weekday)';
+run;
+
+proc sgplot data=miso_no_holidays noautolegend;
+where Month in (6,7,8);
+where also Weekday in (1,2,3,4,5);
+where also Hour in (17);
+reg y=Load x=Temperature / markerattrs=(SYMBOL = circlefilled COLOR = CORNFLOWERBLUE) lineattrs=(COLOR = CORNFLOWERBLUE);
+yaxis label='Load (MW)';
+xaxis label='Temperature (°F)';
+inset (''= "5 P.M. - Weekday") / position=topleft border textattrs=GraphLabelText;
+title 'Load vs Temperature at 5 P.M. (Weekday)';
+run;
+
+
+****************************** RAMP SUMMARY ***************************
+
+proc sort data=miso_no_holidays;
+by Month Hour;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (6);
+by Month hour;
+var delta;
+output out=deltajun mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (7);
+by Month hour;
+var delta;
+output out=deltajul mean=;
+run;
+
+proc means data=miso_no_holidays noprint;
+where Month in (8);
+by Month hour;
+var delta;
+output out=deltaaug mean=;
+run;
+
+
+data avrgramp;
+merge 
+	deltajun(rename=(delta=RampJun))
+	deltajul(rename=(delta=RampJul))
+	deltaaug(rename=(delta=RampAug))
+	;
+	by Hour;
+	keep Hour RampJun RampJul RampAug
+	;
+run;
+
+proc print data=avrgramp;
+run;
+
+proc sgplot data=avrgramp;
+series x=Hour y=RampJun / legendlabel = 'June' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=GOLD);
+series x=Hour y=RampJul / legendlabel = 'July' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=DARKSEAGREEN);
+series x=Hour y=RampAug / legendlabel = 'August'  LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = CRIMSON);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'Load Ramp (MW)' GRID;
+title 'Average Summer Load Ramp';
+run;
