@@ -1,0 +1,822 @@
+************** IMPORT ************************
+
+*** IMPORT ORIGINAL DATA ***;
+
+proc import datafile="\\****************************\MISO_load_weather.csv" 
+	 out=miso
+     dbms=csv replace;
+run;
+
+*** IMPORT HOLIDAY DATA ***;
+
+proc import datafile="\\C****************************\Calendar.csv" 
+	 out=calendar
+     dbms=csv replace;
+run;
+
+*** ADD WEEKDAY VARIABLE TO THE DATA ***;
+
+data weekdaydata;
+set miso;
+date=mdy(Month, Day, Year);
+WeekDay=weekday(date)-1;
+format date date9.;
+run;
+
+*** CALCULATE AND ADD RAMP AS A VARIABLE ***;
+
+data ramp;
+merge weekdaydata weekdaydata(firstobs=2 rename=(load=_load));
+delta=_load-load;
+drop _load;
+run;
+
+*** ADD HOLIDAY AS A NEW VARIABLE ***;
+
+proc sql;
+create table miso_models2 as
+select a.*,b.holiday
+from ramp a left join calendar b
+on a.day=b.day
+and a.year=b.year
+and a.month=b.month
+;
+quit;
+
+*** SORT DATA BY YEAR, MONTH, DAY, HOUR ***;
+
+proc sort data=miso_models2;
+by Year Month Day Hour;
+run;
+
+*** DELETE HOLIDAYS FROM THE DATASET ***;
+
+data miso_no_holidays;
+set miso_models2;
+if Holiday = 1 then delete;
+run;
+
+
+************************** DEW POINT **********************************
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outdewend NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (0,6);
+model Load=Temperature DewPoint;
+by Hour;
+title 'Dew Point Sens in Summer WEEKEND';
+run;
+
+proc reg data=miso_no_holidays outest=outdewday NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (1,2,3,4,5);
+model Load=Temperature DewPoint;
+by Hour;
+title 'Dew Point Sens in Summer WEEKDAY';
+run;
+
+
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outdewlow NOPRINT;
+where Month in (6,7,8);
+where also Temperature < 75;
+model Load=Temperature DewPoint;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outdewmid NOPRINT;
+where Month in (6,7,8);
+where also Temperature between 75 and 85;
+model Load=Temperature DewPoint;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outdewhigh NOPRINT;
+where Month in (6,7,8);
+where also Temperature > 85;
+model Load=Temperature DewPoint;
+by Hour;
+run;
+
+
+
+proc reg data=miso_no_holidays outest=outdewmon NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (1);
+model Load = Temperature DewPoint;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outdewtwt NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (2,3,4);
+model Load = Temperature DewPoint;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outdewfri NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (5);
+model Load = Temperature DewPoint;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outdewsat NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (6);
+model Load = Temperature DewPoint;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outdewsun NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (0);
+model Load = Temperature DewPoint;
+by Hour;
+run;
+
+data dew_sensitivity;
+merge 
+	outdewday(rename=(DewPoint=weekdaydew))
+	outdewend(rename=(DewPoint=weekenddew))
+	outdewlow(rename=(DewPoint=dewlow))
+	outdewmid(rename=(DewPoint=dewmid))
+	outdewhigh(rename=(DewPoint=dewhigh))
+	outdewmon(rename=(DewPoint=dewmon))
+	outdewtwt(rename=(DewPoint=dewtwt))
+	outdewfri(rename=(DewPoint=dewfri))
+	outdewsat(rename=(DewPoint=dewsat))
+	outdewsun(rename=(DewPoint=dewsun))
+	;
+	by hour;
+	keep Hour weekdaydew weekenddew dewlow dewmid dewhigh dewmon dewtwt dewfri dewsat dewsun;
+run;
+
+proc sgplot data=dew_sensitivity;
+series x=Hour y=weekenddew / legendlabel = 'Weekend' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=SALMON );
+series x=Hour y=weekdaydew / legendlabel = 'Weekday' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTBLUE);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Summer Load and Dew Point Sensitivity [MODEL WITH TEMPERATURE]';
+run;
+
+data fixed_intervals_dew;
+	set dew_sensitivity;
+	where 0 le hour le 23;
+	if (13 le hour le 17) then dewlow=.;
+	if (hour lt 8) then dewmid=.;
+	if not (12 le hour le 19) then dewhigh=.;
+run;
+
+proc sgplot data=fixed_intervals_dew;
+series x=Hour y=dewlow/ legendlabel = 'Temperature < 75' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=CORNFLOWERBLUE) BREAK;
+series x=Hour y=dewmid / legendlabel = 'Temperature Between 75 and 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTGREEN) BREAK;
+series x=Hour y=dewhigh / legendlabel = 'Temperature > 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = BLACK) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load and Dew Point Sensitivity at Intervals [MODEL WITH TEMPERATURE]';
+run;
+
+proc sgplot data=dew_sensitivity;
+series x=Hour y=DewMon / legendlabel = 'Monday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=GOLD);
+series x=Hour y=DewTWT / legendlabel = 'Tue-W-Thr' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=CRIMSON);
+series x=Hour y=DewFri / legendlabel = 'Friday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=CORNFLOWERBLUE);
+series x=Hour y=DewSat / legendlabel = 'Saturday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=LIGHTGREEN);
+series x=Hour y=DewSun / legendlabel = 'Sunday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=DARKVIOLET);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD (MW)';
+title 'Load and Dew Point Sensitivity [MODEL WITH TEMPERATURE]';
+run;
+
+proc sgplot data=fixed_intervals_dew;
+series x=Hour y=dewmid / legendlabel = 'Temperature Between 75 and 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTGREEN) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (8 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load vs Dew Point at Medium Temperature';
+run;
+
+proc sgplot data=fixed_intervals_dew;
+series x=Hour y=dewhigh / legendlabel = 'Temperature > 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = BLACK) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (12 TO 19 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load vs Dew Point at High Temperature';
+run;
+
+
+**************** WIND SPEED ***********************************
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outwindend NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (0,6);
+model Load=Temperature DewPoint WindSpeed;
+by Hour;
+title 'Dew Point Sens in Summer WEEKEND';
+run;
+
+proc reg data=miso_no_holidays outest=outwindday NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (1,2,3,4,5);
+model Load=Temperature DewPoint WindSpeed;
+by Hour;
+title 'Dew Point Sens in Summer WEEKDAY';
+run;
+
+
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outwindlow NOPRINT;
+where Month in (6,7,8);
+where also Temperature < 75;
+model Load=Temperature DewPoint WindSpeed;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outwindmid NOPRINT;
+where Month in (6,7,8);
+where also Temperature between 75 and 85;
+model Load=Temperature DewPoint WindSpeed;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outwindhigh NOPRINT;
+where Month in (6,7,8);
+where also Temperature > 85;
+model Load=Temperature DewPoint WindSpeed;
+by Hour;
+run;
+
+
+
+proc reg data=miso_no_holidays outest=outwindmon NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (1);
+model Load = Temperature DewPoint WindSpeed;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outwindtwt NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (2,3,4);
+model Load = Temperature DewPoint WindSpeed;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outwindfri NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (5);
+model Load = Temperature DewPoint WindSpeed;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outwindsat NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (6);
+model Load = Temperature DewPoint WindSpeed;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outwindsun NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (0);
+model Load = Temperature DewPoint WindSpeed;
+by Hour;
+run;
+
+data wind_sensitivity;
+merge 
+	outwindday(rename=(WindSpeed=weekdaywind))
+	outwindend(rename=(WindSpeed=weekendwind))
+	outwindlow(rename=(WindSpeed=windlow))
+	outwindmid(rename=(WindSpeed=windmid))
+	outwindhigh(rename=(WindSpeed=windhigh))
+	outwindmon(rename=(WindSpeed=windmon))
+	outwindtwt(rename=(WindSpeed=windtwt))
+	outwindfri(rename=(WindSpeed=windfri))
+	outwindsat(rename=(WindSpeed=windsat))
+	outwindsun(rename=(WindSpeed=windsun))
+	;
+	by hour;
+	keep Hour weekdaywind weekendwind windlow windmid windhigh windmon windtwt windfri windsat windsun;
+run;
+
+proc sgplot data=wind_sensitivity;
+series x=Hour y=weekendwind / legendlabel = 'Weekend' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=SALMON );
+series x=Hour y=weekdaywind / legendlabel = 'Weekday' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTBLUE);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Summer Load and Dew Point Sensitivity [MODEL WITH TEMPERATURE]';
+run;
+
+data fixed_intervals_wind;
+	set wind_sensitivity;
+	where 0 le hour le 23;
+	if (13 le hour le 17) then windlow=.;
+	if (hour lt 8) then windmid=.;
+	if not (12 le hour le 19) then windhigh=.;
+run;
+
+proc sgplot data=fixed_intervals_wind;
+series x=Hour y=windlow/ legendlabel = 'Temperature < 75' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=CORNFLOWERBLUE) BREAK;
+series x=Hour y=windmid / legendlabel = 'Temperature Between 75 and 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTGREEN) BREAK;
+series x=Hour y=windhigh / legendlabel = 'Temperature > 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = BLACK) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load and Dew Point Sensitivity at Intervals [MODEL WITH TEMPERATURE]';
+run;
+
+proc sgplot data=wind_sensitivity;
+series x=Hour y=windMon / legendlabel = 'Monday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=GOLD);
+series x=Hour y=windTWT / legendlabel = 'Tue-W-Thr' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=CRIMSON);
+series x=Hour y=windFri / legendlabel = 'Friday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=CORNFLOWERBLUE);
+series x=Hour y=windSat / legendlabel = 'Saturday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=LIGHTGREEN);
+series x=Hour y=windSun / legendlabel = 'Sunday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=DARKVIOLET);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD (MW)';
+title 'Load and Dew Point Sensitivity [MODEL WITH TEMPERATURE]';
+run;
+
+proc sgplot data=wind_sensitivity;
+series x=Hour y=weekendwind / legendlabel = 'Weekend' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=SALMON );
+series x=Hour y=weekdaywind / legendlabel = 'Weekday' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTBLUE);
+XAXIS LABEL = 'Hour' GRID VALUES = (14 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load vs Wind Speed after 1 P.M.';
+run;
+
+proc sgplot data=fixed_intervals_wind;
+series x=Hour y=windhigh / legendlabel = 'Temperature > 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = BLACK) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (13 TO 19 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load vs Wind Speed at High Temperature';
+run;
+
+***************** CLOUD COER *************************************
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outccend NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (0,6);
+model Load=Temperature DewPoint WindSpeed CloudCover;
+by Hour;
+title 'Dew Point Sens in Summer WEEKEND';
+run;
+
+proc reg data=miso_no_holidays outest=outccday NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (1,2,3,4,5);
+model Load=Temperature DewPoint WindSpeed CloudCover;
+by Hour;
+title 'Dew Point Sens in Summer WEEKDAY';
+run;
+
+
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outcclow NOPRINT;
+where Month in (6,7,8);
+where also Temperature < 75;
+model Load=Temperature DewPoint WindSpeed CloudCover;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outccmid NOPRINT;
+where Month in (6,7,8);
+where also Temperature between 75 and 85;
+model Load=Temperature DewPoint WindSpeed CloudCover;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outcchigh NOPRINT;
+where Month in (6,7,8);
+where also Temperature > 85;
+model Load=Temperature DewPoint WindSpeed CloudCover;
+by Hour;
+run;
+
+
+
+proc reg data=miso_no_holidays outest=outccmon NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (1);
+model Load = Temperature DewPoint WindSpeed CloudCover;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outcctwt NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (2,3,4);
+model Load = Temperature DewPoint WindSpeed CloudCover;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outccfri NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (5);
+model Load = Temperature DewPoint WindSpeed CloudCover;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outccsat NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (6);
+model Load = Temperature DewPoint WindSpeed CloudCover;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outccsun NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (0);
+model Load = Temperature DewPoint WindSpeed CloudCover;
+by Hour;
+run;
+
+data cc_sensitivity;
+merge 
+	outccday(rename=(CloudCover=weekdaycc))
+	outccend(rename=(CloudCover=weekendcc))
+	outcclow(rename=(CloudCover=cclow))
+	outccmid(rename=(CloudCover=ccmid))
+	outcchigh(rename=(CloudCover=cchigh))
+	outccmon(rename=(CloudCover=ccmon))
+	outcctwt(rename=(CloudCover=cctwt))
+	outccfri(rename=(CloudCover=ccfri))
+	outccsat(rename=(CloudCover=ccsat))
+	outccsun(rename=(CloudCover=ccsun))
+	;
+	by hour;
+	keep Hour weekdaycc weekendcc cclow ccmid cchigh ccmon cctwt ccfri ccsat ccsun;
+run;
+
+proc sgplot data=cc_sensitivity;
+series x=Hour y=weekendcc / legendlabel = 'Weekend' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=SALMON );
+series x=Hour y=weekdaycc / legendlabel = 'Weekday' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTBLUE);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Summer Load and Dew Point Sensitivity [MODEL WITH TEMPERATURE]';
+run;
+
+data fixed_intervals_cc;
+	set cc_sensitivity;
+	where 0 le hour le 23;
+	if (13 le hour le 17) then cclow=.;
+	if (hour lt 8) then ccmid=.;
+	if not (12 le hour le 19) then cchigh=.;
+run;
+
+proc sgplot data=fixed_intervals_cc;
+series x=Hour y=cclow / legendlabel = 'Temperature < 75' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=CORNFLOWERBLUE) BREAK;
+series x=Hour y=ccmid / legendlabel = 'Temperature Between 75 and 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTGREEN) BREAK;
+series x=Hour y=cchigh / legendlabel = 'Temperature > 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = BLACK) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load and Dew Point Sensitivity at Intervals [MODEL WITH TEMPERATURE]';
+run;
+
+proc sgplot data=cc_sensitivity;
+series x=Hour y=ccMon / legendlabel = 'Monday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=GOLD);
+series x=Hour y=ccTWT / legendlabel = 'Tue-W-Thr' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=CRIMSON);
+series x=Hour y=ccFri / legendlabel = 'Friday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=CORNFLOWERBLUE);
+series x=Hour y=ccSat / legendlabel = 'Saturday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=LIGHTGREEN);
+series x=Hour y=ccSun / legendlabel = 'Sunday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=DARKVIOLET);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD (MW)';
+title 'Load and Dew Point Sensitivity [MODEL WITH TEMPERATURE]';
+run;
+
+proc sgplot data=fixed_intervals_cc;
+series x=Hour y=cclow / legendlabel = 'Temperature < 75' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=CORNFLOWERBLUE) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 10 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load vs Cloud Cover at Low Temperature';
+run;
+
+proc sgplot data=fixed_intervals_cc;
+series x=Hour y=ccmid / legendlabel = 'Temperature Between 75 and 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTGREEN) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (8 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load vs Cloud Cover at Medium Temperature';
+run;
+
+********************** SOLAR RAD *********************************************
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outsrend NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (0,6);
+where also Hour in (10:19);
+model Load=Temperature DewPoint WindSpeed CloudCover SolarRadiation;
+by Hour;
+title 'Dew Point Sens in Summer WEEKEND';
+run;
+
+proc reg data=miso_no_holidays outest=outsrday NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (1,2,3,4,5);
+where also Hour in (10:19);
+model Load=Temperature DewPoint WindSpeed CloudCover SolarRadiation;
+by Hour;
+title 'Dew Point Sens in Summer WEEKDAY';
+run;
+
+
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outsrlow NOPRINT;
+where Month in (6,7,8);
+where also Temperature < 75;
+where also Hour in (10:19);
+model Load=Temperature DewPoint WindSpeed CloudCover SolarRadiation;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outsrmid NOPRINT;
+where Month in (6,7,8);
+where also Temperature between 75 and 85;
+where also Hour in (10:19);
+model Load=Temperature DewPoint WindSpeed CloudCover SolarRadiation;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outsrhigh NOPRINT;
+where Month in (6,7,8);
+where also Temperature > 85;
+where also Hour in (10:19);
+model Load=Temperature DewPoint WindSpeed CloudCover SolarRadiation;
+by Hour;
+run;
+
+
+
+proc reg data=miso_no_holidays outest=outsrmon NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (1);
+where also Hour in (10:19);
+model Load = Temperature DewPoint WindSpeed CloudCover SolarRadiation;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outsrtwt NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (2,3,4);
+where also Hour in (10:19);
+model Load = Temperature DewPoint WindSpeed CloudCover SolarRadiation;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outsrfri NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (5);
+where also Hour in (10:19);
+model Load = Temperature DewPoint WindSpeed CloudCover SolarRadiation;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outsrsat NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (6);
+where also Hour in (10:19);
+model Load = Temperature DewPoint WindSpeed CloudCover SolarRadiation;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outsrsun NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (0);
+where also Hour in (10:19);
+model Load = Temperature DewPoint WindSpeed CloudCover SolarRadiation;
+by Hour;
+run;
+
+data sr_sensitivity;
+merge 
+	outsrday(rename=(SolarRadiation=weekdaysr))
+	outsrend(rename=(SolarRadiation=weekendsr))
+	outsrlow(rename=(SolarRadiation=srlow))
+	outsrmid(rename=(SolarRadiation=srmid))
+	outsrhigh(rename=(SolarRadiation=srhigh))
+	outsrmon(rename=(SolarRadiation=srmon))
+	outsrtwt(rename=(SolarRadiation=srtwt))
+	outsrfri(rename=(SolarRadiation=srfri))
+	outsrsat(rename=(SolarRadiation=srsat))
+	outsrsun(rename=(SolarRadiation=srsun))
+	;
+	by hour;
+	keep Hour weekdaysr weekendsr srlow srmid srhigh srmon srtwt srfri srsat srsun;
+run;
+
+proc sgplot data=sr_sensitivity;
+series x=Hour y=weekendsr / legendlabel = 'Weekend' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=SALMON );
+series x=Hour y=weekdaysr / legendlabel = 'Weekday' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTBLUE);
+XAXIS LABEL = 'Hour' GRID VALUES = (10 TO 19 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Summer Load and Dew Point Sensitivity [MODEL WITH TEMPERATURE]';
+run;
+
+data fixed_intervals_sr;
+	set sr_sensitivity;
+	where 0 le hour le 23;
+	if (13 le hour le 17) then srlow=.;
+	if (hour lt 8) then srmid=.;
+	if not (12 le hour le 19) then srhigh=.;
+run;
+
+proc sgplot data=fixed_intervals_sr;
+series x=Hour y=srlow/ legendlabel = 'Temperature < 75' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=CORNFLOWERBLUE) BREAK;
+series x=Hour y=srmid / legendlabel = 'Temperature Between 75 and 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTGREEN) BREAK;
+series x=Hour y=srhigh / legendlabel = 'Temperature > 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = BLACK) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (10 TO 19 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load and Dew Point Sensitivity at Intervals [MODEL WITH TEMPERATURE]';
+run;
+
+proc sgplot data=sr_sensitivity;
+series x=Hour y=srmon / legendlabel = 'Monday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=GOLD);
+series x=Hour y=srtwt / legendlabel = 'Tue-W-Thr' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=CRIMSON);
+series x=Hour y=srfri / legendlabel = 'Friday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=CORNFLOWERBLUE);
+series x=Hour y=srsat / legendlabel = 'Saturday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=LIGHTGREEN);
+series x=Hour y=srsun / legendlabel = 'Sunday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=DARKVIOLET);
+XAXIS LABEL = 'Hour' GRID VALUES = (10 TO 19 BY 1);
+YAXIS LABEL = 'LOAD (MW)';
+title 'Load and Dew Point Sensitivity [MODEL WITH TEMPERATURE]';
+run;
+
+proc sgplot data=fixed_intervals_sr;
+series x=Hour y=srmid / legendlabel = 'Temperature Between 75 and 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTGREEN) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (10 TO 19 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load vs Solar Radiation at Medium Temperature';
+run;
+
+proc sgplot data=sr_sensitivity;
+pbspline x=Hour y=weekendsr / nomarkers legendlabel = 'Weekend' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=SALMON );
+pbspline x=Hour y=weekdaysr / nomarkers legendlabel = 'Weekday' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTBLUE);
+XAXIS LABEL = 'Hour' GRID VALUES = (10 TO 19 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Smooth Line Sensitivity';
+run;
+
+******************** TEMPERATURE ************************************
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outtempend NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (0,6);
+model Load=Temperature;
+by Hour;
+title 'Dew Point Sens in Summer WEEKEND';
+run;
+
+proc reg data=miso_no_holidays outest=outtempday NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (1,2,3,4,5);
+model Load=Temperature;
+by Hour;
+title 'Dew Point Sens in Summer WEEKDAY';
+run;
+
+
+
+proc sort data=miso_no_holidays;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outtemplow NOPRINT;
+where Month in (6,7,8);
+where also Temperature < 75;
+model Load=Temperature;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outtempmid NOPRINT;
+where Month in (6,7,8);
+where also Temperature between 75 and 85;
+model Load=Temperature;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outtemphigh NOPRINT;
+where Month in (6,7,8);
+where also Temperature > 85;
+model Load=Temperature;
+by Hour;
+run;
+
+
+
+proc reg data=miso_no_holidays outest=outtempmon NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (1);
+model Load = Temperature;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outtemptwt NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (2,3,4);
+model Load = Temperature;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outtempfri NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (5);
+model Load = Temperature;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outtempsat NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (6);
+model Load = Temperature;
+by Hour;
+run;
+
+proc reg data=miso_no_holidays outest=outtempsun NOPRINT;
+where Month in (6,7,8);
+where also Weekday in (0);
+model Load = Temperature;
+by Hour;
+run;
+
+data temp_sensitivity;
+merge 
+	outtempday(rename=(Temperature=weekdaytemp))
+	outtempend(rename=(Temperature=weekendtemp))
+	outtemplow(rename=(Temperature=templow))
+	outtempmid(rename=(Temperature=tempmid))
+	outtemphigh(rename=(Temperature=temphigh))
+	outtempmon(rename=(Temperature=tempmon))
+	outtemptwt(rename=(Temperature=temptwt))
+	outtempfri(rename=(Temperature=tempfri))
+	outtempsat(rename=(Temperature=tempsat))
+	outtempsun(rename=(Temperature=tempsun))
+	;
+	by hour;
+	keep Hour weekdaytemp weekendtemp templow tempmid temphigh tempmon temptwt tempfri tempsat tempsun;
+run;
+
+proc sgplot data=temp_sensitivity;
+series x=Hour y=weekendtemp / legendlabel = 'Weekend' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=SALMON );
+series x=Hour y=weekdaytemp / legendlabel = 'Weekday' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTBLUE);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Summer Load and Dew Point Sensitivity [MODEL WITH TEMPERATURE]';
+run;
+
+data fixed_intervals_temp;
+	set temp_sensitivity;
+	where 0 le hour le 23;
+	if (13 le hour le 17) then templow=.;
+	if (hour lt 8) then tempmid=.;
+	if not (12 le hour le 19) then temphigh=.;
+run;
+
+proc sgplot data=fixed_intervals_temp;
+series x=Hour y=templow/ legendlabel = 'Temperature < 75' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=CORNFLOWERBLUE) BREAK;
+series x=Hour y=tempmid / legendlabel = 'Temperature Between 75 and 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR=LIGHTGREEN) BREAK;
+series x=Hour y=temphigh / legendlabel = 'Temperature > 85' LINEATTRS = (THICKNESS = 3 PATTERN = SOLID COLOR = BLACK) BREAK;
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD SENSITIVITY (MW)';
+title 'Load and Dew Point Sensitivity at Intervals [MODEL WITH TEMPERATURE]';
+run;
+
+proc sgplot data=temp_sensitivity;
+series x=Hour y=tempMon / legendlabel = 'Monday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=GOLD);
+series x=Hour y=tempTWT / legendlabel = 'Tue-W-Thr' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=CRIMSON);
+series x=Hour y=tempFri / legendlabel = 'Friday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=CORNFLOWERBLUE);
+series x=Hour y=tempSat / legendlabel = 'Saturday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=LIGHTGREEN);
+series x=Hour y=tempSun / legendlabel = 'Sunday' LINEATTRS = (THICKNESS = 2 PATTERN=SOLID COLOR=DARKVIOLET);
+XAXIS LABEL = 'Hour' GRID VALUES = (0 TO 23 BY 1);
+YAXIS LABEL = 'LOAD (MW)';
+title 'Load and Dew Point Sensitivity [MODEL WITH TEMPERATURE]';
+run;
