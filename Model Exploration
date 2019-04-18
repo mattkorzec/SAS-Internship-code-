@@ -1,0 +1,108 @@
+********************* IMPORT ****************************
+
+*** IMPORT ORIGINAL DATA ***;
+
+proc import datafile="\\*****************************\MISO_load_weather.csv" 
+	 out=miso
+     dbms=csv replace;
+run;
+
+*** IMPORT HOLIDAY DATA ***;
+
+proc import datafile="\\******************************************\DATA\Calendar.csv" 
+	 out=calendar
+     dbms=csv replace;
+run;
+
+*** ADD WEEKDAY VARIABLE TO THE DATA ***;
+
+data weekdaydata;
+set miso;
+date=mdy(Month, Day, Year);
+WeekDay=weekday(date)-1;
+format date date9.;
+run;
+
+*** CALCULATE AND ADD RAMP AS A VARIABLE ***;
+
+data ramp;
+merge weekdaydata weekdaydata(firstobs=2 rename=(load=_load));
+delta=_load-load;
+drop _load;
+run;
+
+*** ADD HOLIDAY AS A NEW VARIABLE ***;
+
+proc sql;
+create table miso_models2 as
+select a.*,b.holiday
+from ramp a left join calendar b
+on a.day=b.day
+and a.year=b.year
+and a.month=b.month
+;
+quit;
+
+*** SORT DATA BY YEAR, MONTH, DAY, HOUR ***;
+
+proc sort data=miso_models2;
+by Year Month Day Hour;
+run;
+
+*** DELETE HOLIDAYS FROM THE DATASET ***;
+
+data miso_no_holidays;
+set miso_models2;
+if Holiday = 1 then delete;
+run;
+
+
+*********** DUMMY VARAIBLES AND MODELS ELECTION *****************************************
+
+data miso_models3;
+set miso_no_holidays;
+if weekday=1 then week_day=1;
+if weekday in (2,3,4) then week_day=2;
+if weekday=5 then week_day=5;
+if weekday=6 then week_day=6;
+if weekday=0 then week_day=0;
+if Temperature =< 75 then temp=1;
+if Temperature > 75 and Temperature < 85 then temp=2;
+if Temperature => 85 then temp=3;
+run;
+
+proc sort data=miso_models3;
+by Hour;
+run;
+
+proc format;
+value weekday5_
+1='Monday'
+2='TWT'
+5='Friday'
+6='Saturday'
+0='Sunday'
+;
+
+value weekday6_
+6='June'
+7='July'
+8='August'
+;
+
+value weekday7_
+1='<75'
+2='75-85'
+3='>85'
+;
+
+
+proc glmselect data=miso_models3;
+where Month in (6,7,8);
+class Month week_day temp;
+format week_day weekday5_.;
+format Month weekday6_.;
+format temp weekday7_.;
+model Load = Month week_day Temperature temp DewPoint WindSpeed CloudCover SolarRadiation / selection=stepwise(select=SL) stats=all;
+by Hour;
+run;
